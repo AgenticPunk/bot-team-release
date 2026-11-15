@@ -1,0 +1,410 @@
+#!/usr/bin/env bash
+# Build bot-team from the private source tree and stage distributable binaries.
+#
+# The CLI bundle is assembled from compiled output only: TypeScript sources,
+# type declarations, source maps and test fixtures are excluded. The app zip is
+# produced by electron-builder and already contains the CLI.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DIST="$ROOT/dist"
+SRC="${BOT_TEAM_SRC:-$(cd "$ROOT/.." && pwd)/bot-team}"
+VERSION=""
+ONLY="all"
+DO_BUILD=1
+PUBLISH=0
+TMP=""
+
+usage() {
+  cat <<'EOF'
+Usage: ./release [options]
+
+Builds the CLI and the Electron app from the private bot-team source tree and
+stages release assets in ./dist. With --publish it also commits release
+metadata, pushes the tag, and uploads the assets to GitHub Releases.
+
+Options:
+  --version <x.y.z>   Release version (default: `bot-team version` from the build)
+  --source <dir>      Source tree (default: $BOT_TEAM_SRC or ../bot-team)
+  --only <target>     cli | app | all (default: all; local staging only)
+  --no-build          Use the source tree's existing build output
+  --publish           Commit metadata, push, tag, and create/update the GitHub
+                      release. Requires a clean tree, an origin remote and `gh`.
+  -h, --help          Show this help
+
+Environment:
+  BOT_TEAM_SRC        Default source tree
+  BOT_TEAM_REPO       owner/repo used in release notes (default: derived from
+                      origin, then AgenticPunk/bot-team-release)
+
+Examples:
+  ./release                       # build everything, stage dist/, no network
+  ./release --no-build            # stage the current build output
+  ./release --version 0.3.0 --publish
+EOF
+}
+
+die() {
+  printf 'release: %s\n' "$*" >&2
+  exit 1
+}
+
+cleanup() {
+  if [ -n "$TMP" ] && [ -d "$TMP" ]; then
+    rm -rf "$TMP"
+  fi
+}
+trap cleanup EXIT
+
+sha256_of() {
+  shasum -a 256 "$1" | awk '{print $1}'
+}
+
+size_of() {
+  wc -c < "$1" | tr -d ' '
+}
+
+repo_slug() {
+  if [ -n "${BOT_TEAM_REPO:-}" ]; then
+    printf '%s' "$BOT_TEAM_REPO"
+    return
+  fi
+  local url=""
+  url="$(git -C "$ROOT" remote get-url origin 2>/dev/null || true)"
+  case "$url" in
+    git@github.com:*.git)
+      url="${url#git@github.com:}"
+      url="${url%.git}"
+      ;;
+    git@github.com:*)
+      url="${url#git@github.com:}"
+      ;;
+    https://github.com/*.git)
+      url="${url#https://github.com/}"
+      url="${url%.git}"
+      ;;
+    https://github.com/*)
+      url="${url#https://github.com/}"
+      ;;
+    *)
+      url=""
+      ;;
+  esac
+  if [ -z "$url" ]; then
+    url="AgenticPunk/bot-team-release"
+  fi
+  printf '%s' "$url"
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --version)
+      [ $# -ge 2 ] || die "--version needs a value"
+      VERSION="$2"
+      shift 2
+      ;;
+    --source)
+      [ $# -ge 2 ] || die "--source needs a value"
+      SRC="$2"
+      shift 2
+      ;;
+    --only)
+      [ $# -ge 2 ] || die "--only needs a value"
+      ONLY="$2"
+      shift 2
+      ;;
+    --no-build)
+      DO_BUILD=0
+      shift
+      ;;
+    --publish)
+      PUBLISH=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      die "unknown option: $1 (try --help)"
+      ;;
+  esac
+done
+
+case "$ONLY" in
+  cli|app|all) ;;
+  *) die "--only must be cli, app or all" ;;
+esac
+
+[ -d "$SRC" ] || die "source tree not found: $SRC"
+SRC="$(cd "$SRC" && pwd)"
+[ -f "$SRC/pnpm-workspace.yaml" ] && [ -f "$SRC/cli/package.json" ] ||
+  die "not a bot-team source tree: $SRC"
+
+[ "$(uname -s)" = "Darwin" ] ||
+  die "this release layout is macOS-only (the Electron target and btpty are macOS builds)"
+ARCH="$(uname -m)"
+case "$ARCH" in
+  arm64|x86_64) ;;
+  *) die "unsupported architecture: $ARCH" ;;
+esac
+
+SLUG="$(repo_slug)"
+
+if [ "$PUBLISH" -eq 1 ]; then
+  [ "$ONLY" = "all" ] || die "--publish requires a full release (--only is for local staging)"
+  command -v gh >/dev/null 2>&1 || die "--publish requires the GitHub CLI (gh)"
+  git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1 ||
+    die "--publish requires $ROOT to be a git repository"
+  git -C "$ROOT" remote get-url origin >/dev/null 2>&1 ||
+    die "--publish requires an origin remote"
+  gh auth status >/dev/null 2>&1 ||
+    die "gh is not authenticated (run: gh auth login)"
+fi
+
+if [ "$DO_BUILD" -eq 1 ]; then
+  command -v pnpm >/dev/null 2>&1 || die "pnpm not found"
+  command -v node >/dev/null 2>&1 || die "node not found"
+  [ -d "$SRC/node_modules" ] ||
+    die "source dependencies are missing; run: (cd \"$SRC\" && pnpm install)"
+
+  printf '==> building CLI\n'
+  (cd "$SRC" && pnpm --filter @bot-team/cli build)
+
+  if [ "$ONLY" != "cli" ]; then
+    printf '==> packaging Electron app\n'
+    (cd "$SRC" && pnpm --filter @bot-team/app release)
+  fi
+fi
+
+[ -f "$SRC/cli/dist/index.js" ] ||
+  die "missing $SRC/cli/dist/index.js (run without --no-build)"
+[ -x "$SRC/cli/bin/bot-team" ] ||
+  die "missing executable $SRC/cli/bin/bot-team"
+[ -x "$SRC/cli/bin/btpty" ] ||
+  die "missing executable $SRC/cli/bin/btpty"
+
+APP_ZIP=""
+if [ "$ONLY" != "cli" ]; then
+  APP_ZIP="$(ls -t "$SRC"/app/release/*.zip 2>/dev/null | head -n 1 || true)"
+  [ -n "$APP_ZIP" ] && [ -f "$APP_ZIP" ] ||
+    die "no Electron zip in $SRC/app/release (run without --no-build)"
+fi
+
+if [ -z "$VERSION" ]; then
+  VERSION="$(node "$SRC/cli/dist/index.js" version | awk '{print $2}' | tr -d '\r')"
+fi
+[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] ||
+  die "invalid version: $VERSION"
+
+mkdir -p "$DIST" "$ROOT/releases"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/bot-team-release.XXXXXX")"
+
+BUILT_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+SOURCE_COMMIT=""
+if git -C "$SRC" rev-parse --git-dir >/dev/null 2>&1; then
+  SOURCE_COMMIT="$(git -C "$SRC" rev-parse --short=12 HEAD 2>/dev/null || true)"
+fi
+SOURCE_DIRTY=0
+if [ -n "$(git -C "$SRC" status --porcelain 2>/dev/null || true)" ]; then
+  SOURCE_DIRTY=1
+fi
+
+CLI_ASSET=""
+CLI_SHA=""
+CLI_SIZE=""
+APP_ASSET=""
+APP_SHA=""
+APP_SIZE=""
+
+if [ "$ONLY" != "app" ]; then
+  printf '==> staging CLI %s\n' "$VERSION"
+  CLI_NAME="bot-team-cli-${VERSION}-darwin-${ARCH}"
+  CLI_STAGE="$TMP/$CLI_NAME"
+  mkdir -p "$CLI_STAGE/bin" "$CLI_STAGE/dist"
+
+  cp -p "$SRC/cli/bin/bot-team" "$CLI_STAGE/bin/bot-team"
+  cp -p "$SRC/cli/bin/btpty" "$CLI_STAGE/bin/btpty"
+  find "$SRC/cli/dist" -maxdepth 1 -type f -name '*.js' -exec cp -p {} "$CLI_STAGE/dist/" \;
+  chmod 755 "$CLI_STAGE/bin/bot-team" "$CLI_STAGE/bin/btpty"
+
+  cat > "$CLI_STAGE/package.json" <<EOF
+{
+  "name": "@bot-team/cli",
+  "version": "${VERSION}",
+  "private": true,
+  "description": "bot-team headless core + CLI",
+  "type": "module",
+  "bin": {
+    "bot-team": "bin/bot-team"
+  },
+  "main": "dist/index.js",
+  "engines": {
+    "node": ">=20"
+  }
+}
+EOF
+
+  cat > "$CLI_STAGE/README.txt" <<EOF
+bot-team CLI ${VERSION} (darwin-${ARCH})
+
+Run:
+  ./bin/bot-team help
+  ./bin/bot-team serve
+
+Requires Node.js 20+ on PATH, or set BOT_TEAM_NODE to a node binary.
+EOF
+
+  cp "$ROOT/LICENSE" "$CLI_STAGE/LICENSE"
+
+  CLI_ASSET="$CLI_NAME.tar.gz"
+  rm -f "$DIST/$CLI_ASSET"
+  (cd "$TMP" && COPYFILE_DISABLE=1 tar -czf "$DIST/$CLI_ASSET" "$CLI_NAME")
+  CLI_SHA="$(sha256_of "$DIST/$CLI_ASSET")"
+  CLI_SIZE="$(size_of "$DIST/$CLI_ASSET")"
+fi
+
+if [ "$ONLY" != "cli" ]; then
+  printf '==> staging app %s\n' "$VERSION"
+  APP_ASSET="bot-team-app-${VERSION}-darwin-${ARCH}.zip"
+  rm -f "$DIST/$APP_ASSET"
+  cp -p "$APP_ZIP" "$DIST/$APP_ASSET"
+  APP_SHA="$(sha256_of "$DIST/$APP_ASSET")"
+  APP_SIZE="$(size_of "$DIST/$APP_ASSET")"
+fi
+
+printf '==> writing checksums and manifest\n'
+: > "$DIST/SHA256SUMS"
+if [ -n "$CLI_ASSET" ]; then
+  (cd "$DIST" && shasum -a 256 "$CLI_ASSET") >> "$DIST/SHA256SUMS"
+fi
+if [ -n "$APP_ASSET" ]; then
+  (cd "$DIST" && shasum -a 256 "$APP_ASSET") >> "$DIST/SHA256SUMS"
+fi
+
+MANIFEST_PATH="$TMP/manifest.json" \
+VERSION="$VERSION" \
+BUILT_AT="$BUILT_AT" \
+ARCH="$ARCH" \
+SOURCE_COMMIT="$SOURCE_COMMIT" \
+SOURCE_DIRTY="$SOURCE_DIRTY" \
+CLI_ASSET="$CLI_ASSET" \
+CLI_SHA="$CLI_SHA" \
+CLI_SIZE="$CLI_SIZE" \
+APP_ASSET="$APP_ASSET" \
+APP_SHA="$APP_SHA" \
+APP_SIZE="$APP_SIZE" \
+node <<'NODE'
+const fs = require("node:fs");
+const artifacts = [];
+const rows = [
+  [process.env.CLI_ASSET, process.env.CLI_SHA, process.env.CLI_SIZE],
+  [process.env.APP_ASSET, process.env.APP_SHA, process.env.APP_SIZE],
+];
+for (const [name, sha256, size] of rows) {
+  if (name) artifacts.push({ name, sha256, size: Number(size) });
+}
+const manifest = {
+  version: process.env.VERSION,
+  tag: `v${process.env.VERSION}`,
+  builtAt: process.env.BUILT_AT,
+  platform: "darwin",
+  arch: process.env.ARCH,
+  sourceCommit: process.env.SOURCE_COMMIT || null,
+  sourceDirty: process.env.SOURCE_DIRTY === "1",
+  artifacts,
+};
+fs.writeFileSync(
+  process.env.MANIFEST_PATH,
+  `${JSON.stringify(manifest, null, 2)}\n`,
+);
+NODE
+
+cp "$TMP/manifest.json" "$ROOT/releases/v${VERSION}.json"
+cp "$TMP/manifest.json" "$DIST/latest.json"
+if [ "$ONLY" = "all" ]; then
+  cp "$TMP/manifest.json" "$ROOT/latest.json"
+fi
+
+NOTES="$TMP/RELEASE_NOTES.md"
+{
+  printf 'bot-team v%s\n\n' "$VERSION"
+  printf 'Built for macOS %s.\n\n' "$ARCH"
+  printf 'Artifacts:\n'
+  if [ -n "$CLI_ASSET" ]; then
+    printf -- '- `%s` — standalone CLI bundle\n' "$CLI_ASSET"
+  fi
+  if [ -n "$APP_ASSET" ]; then
+    printf -- '- `%s` — Electron desktop app\n' "$APP_ASSET"
+  fi
+  printf -- '- `SHA256SUMS` — checksums\n\n'
+  printf 'Install:\n\n'
+  printf '```sh\n'
+  printf 'curl -fsSL https://raw.githubusercontent.com/%s/main/install.sh | bash\n' "$SLUG"
+  printf '```\n'
+} > "$NOTES"
+
+printf '\nStaged %s\n' "$DIST"
+printf '  version: %s\n' "$VERSION"
+if [ -n "$CLI_ASSET" ]; then
+  printf '  cli:     %s (%s bytes)\n' "$CLI_ASSET" "$CLI_SIZE"
+fi
+if [ -n "$APP_ASSET" ]; then
+  printf '  app:     %s (%s bytes)\n' "$APP_ASSET" "$APP_SIZE"
+fi
+printf '  metadata: releases/v%s.json\n' "$VERSION"
+
+if [ "$PUBLISH" -eq 0 ]; then
+  printf '\nUpload manually, or publish with:\n  ./release --version %s --no-build --publish\n' "$VERSION"
+  exit 0
+fi
+
+printf '==> publishing v%s to %s\n' "$VERSION" "$SLUG"
+
+if [ -n "$(git -C "$ROOT" diff --cached --name-only | grep -Ev '^(latest\.json|releases/)' || true)" ]; then
+  die "unrelated staged changes are present; commit or unstage them first"
+fi
+
+git -C "$ROOT" add -- latest.json "releases/v${VERSION}.json"
+if ! git -C "$ROOT" diff --cached --quiet; then
+  git -C "$ROOT" commit -m "release: v${VERSION}"
+fi
+
+if [ -n "$(git -C "$ROOT" status --porcelain)" ]; then
+  die "working tree has other uncommitted changes; commit or stash them first"
+fi
+
+git -C "$ROOT" push origin HEAD
+
+TAG="v${VERSION}"
+if git -C "$ROOT" rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+  [ "$(git -C "$ROOT" rev-list -n 1 "$TAG")" = "$(git -C "$ROOT" rev-parse HEAD)" ] ||
+    die "tag $TAG already points at a different commit"
+  git -C "$ROOT" push origin "refs/tags/$TAG"
+else
+  git -C "$ROOT" tag -a "$TAG" -m "bot-team ${VERSION}"
+  git -C "$ROOT" push origin "refs/tags/$TAG"
+fi
+
+ASSETS=("$DIST/latest.json" "$DIST/SHA256SUMS")
+if [ -n "$CLI_ASSET" ]; then
+  ASSETS+=("$DIST/$CLI_ASSET")
+fi
+if [ -n "$APP_ASSET" ]; then
+  ASSETS+=("$DIST/$APP_ASSET")
+fi
+
+if gh release view "$TAG" --repo "$SLUG" >/dev/null 2>&1; then
+  printf '==> updating existing release %s\n' "$TAG"
+  gh release upload "$TAG" "${ASSETS[@]}" --repo "$SLUG" --clobber
+else
+  printf '==> creating release %s\n' "$TAG"
+  gh release create "$TAG" "${ASSETS[@]}" \
+    --repo "$SLUG" \
+    --title "bot-team ${VERSION}" \
+    --notes-file "$NOTES" \
+    --verify-tag \
+    --latest
+fi
+
+printf '\nPublished: https://github.com/%s/releases/tag/%s\n' "$SLUG" "$TAG"
