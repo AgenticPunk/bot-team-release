@@ -1,0 +1,21 @@
+{
+  "version": "1.1.0",
+  "tag": "v1.1.0",
+  "builtAt": "2026-11-25T02:06:39Z",
+  "platform": "darwin",
+  "arch": "arm64",
+  "sourceCommit": "801e70a5d3f6",
+  "sourceDirty": true,
+  "artifacts": [
+    {
+      "name": "bot-team-cli-1.1.0-darwin-arm64.tar.gz",
+      "sha256": "00ef480c85466c3f8628e2982ab227a988febe5555c58dccbc863aff12c63d88",
+      "size": 947611
+    },
+    {
+      "name": "bot-team-app-1.1.0-darwin-arm64.zip",
+      "sha256": "81344e1242a313a9d2bc0cdfed08e6a5e819245912550692cd7c9d86f8dea6ad",
+      "size": 99388101
+    }
+  ]
+}
