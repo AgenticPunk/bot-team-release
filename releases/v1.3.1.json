@@ -1,0 +1,24 @@
+{
+  "version": "1.3.1",
+  "tag": "v1.3.1",
+  "repo": "AgenticPunk/bot-team-release",
+  "releaseUrl": "https://github.com/AgenticPunk/bot-team-release/releases/tag/v1.3.1",
+  "builtAt": "2026-11-25T09:05:14Z",
+  "platform": "darwin",
+  "arch": "arm64",
+  "sourceCommit": "2bdeca43a0a0",
+  "sourceDirty": true,
+  "releaseNotes": "# v1.3.1 Release Notes — Mac Electron Startup Blank-Screen Hotfix\n\n**`bot-team v1.3.1`** is an immediate patch release on top of **`v1.3.0`** fixing the P0 macOS Electron startup blank-screen issue reported in `#F-548` (`#C-548-1`), verified end-to-end on the packaged macOS `arm64` `.app` bundle while keeping the frozen 20-file Tier-1 `AgentDaemon` untouched (`ADR 0012`, `daemon-boundary` `10/10`, `daemonOutdated === false`).\n\n\n## What Changed in `v1.3.1`\n\n- **Fixed Mac Electron Blank Screen on Startup (`BOT-455`, commits `b3b6bb8`, `47de587`, `edd0a07`, `#F-548`)**:\n  - Previously, `app/electron/preload.ts` exposed the IPC bridge directly at `window.botTeam` via `contextBridge.exposeInMainWorld`, making `window.botTeam` non-writable (`writable: false, configurable: false`). When `DesktopApiMux` mounted at renderer boot and assigned `window.botTeam = mux`, Chromium threw `TypeError: Cannot assign to read only property 'botTeam' of object '#<Window>'` before React rendered.\n  - Exposes the native Electron preload bridge on `window.__botTeamNative` instead, installs `DesktopApiMux` cleanly onto `window.botTeam` in `app/src/main.tsx`, forwards the native `updater` bridge cleanly through `DesktopApiMux` (`window.botTeam.updater` / `window.botTeamUpdater`), and declares `Window.botTeamUpdater` in `app/src/env.d.ts`.\n- **Automated Preload Boot Regression Suite (`cli/test/desktop-preload-boot.mjs`)**:\n  - Locks the read-only `contextBridge` simulation (`Object.defineProperty(..., { writable: false, configurable: false })`), `DesktopApiMux` initialization, and `updater` forwarding contract so this failure mode cannot regress.\n\n\n## Verification\n\n- Full verification gate passed: `sync-shared --check`, `@bot-team/cli build`, `daemon-boundary` (`10/10`), `core-hot-reload`, `desktop-preload-boot`, `@bot-team/app` renderer & Electron `tsc --noEmit`, Vite build, and `pnpm lint:comments` (`0`).\n- Packaged macOS `arm64` `bot-team.app` verified launching cleanly in an isolated `BOT_TEAM_HOME` with zero `botTeam` read-only errors and live rendered UI.\n- Synced to Railway `cloud-gateway` (`bot-team-services`) and published to `AgenticPunk/bot-team-release` (`v1.3.1`).\n\n---\n\n## Artifacts & Install\n\nbot-team v1.3.1\n\nBuilt for macOS arm64.\n\nArtifacts:\n- `bot-team-cli-1.3.1-darwin-arm64.tar.gz` — standalone CLI bundle\n- `bot-team-app-1.3.1-darwin-arm64.zip` — Electron desktop app\n- `SHA256SUMS` — checksums\n\nInstall:\n\n```sh\ncurl -fsSL https://raw.githubusercontent.com/AgenticPunk/bot-team-release/main/install.sh | bash\n```",
+  "artifacts": [
+    {
+      "name": "bot-team-cli-1.3.1-darwin-arm64.tar.gz",
+      "sha256": "c7b87abbb57139bb43840c0dde5d788bf2a20d1d95bc99354d0046362a21f5fb",
+      "size": 973060
+    },
+    {
+      "name": "bot-team-app-1.3.1-darwin-arm64.zip",
+      "sha256": "e031c15d38de12c025d9d906f48a26c1056b22061a7cb1f8384fffa83fec298c",
+      "size": 101960380
+    }
+  ]
+}
