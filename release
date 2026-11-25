@@ -282,7 +282,92 @@ if [ -n "$APP_ASSET" ]; then
   (cd "$DIST" && shasum -a 256 "$APP_ASSET") >> "$DIST/SHA256SUMS"
 fi
 
+NOTES="$TMP/RELEASE_NOTES.md"
+SUMMARY_NOTES="$TMP/RELEASE_SUMMARY.md"
+{
+  printf 'bot-team v%s\n\n' "$VERSION"
+  printf 'Built for macOS %s.\n\n' "$ARCH"
+  printf 'Artifacts:\n'
+  if [ -n "$CLI_ASSET" ]; then
+    printf -- '- `%s` — standalone CLI bundle\n' "$CLI_ASSET"
+  fi
+  if [ -n "$APP_ASSET" ]; then
+    printf -- '- `%s` — Electron desktop app\n' "$APP_ASSET"
+  fi
+  printf -- '- `SHA256SUMS` — checksums\n\n'
+  printf 'Install:\n\n'
+  printf '```sh\n'
+  printf 'curl -fsSL https://raw.githubusercontent.com/%s/main/install.sh | bash\n' "$SLUG"
+  printf '```\n'
+} > "$SUMMARY_NOTES"
+
+SRC_DIR="$SRC" \
+VERSION="$VERSION" \
+SUMMARY_PATH="$SUMMARY_NOTES" \
+NOTES_PATH="$NOTES" \
+node <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+
+const srcDir = process.env.SRC_DIR || "";
+const version = (process.env.VERSION || "").replace(/^v/i, "");
+const dashed = `v${version.replace(/\./g, "-")}`.toLowerCase();
+const summary = fs.readFileSync(process.env.SUMMARY_PATH, "utf8").trim();
+const journalsDir = path.join(srcDir, ".bot-team", "journals");
+
+function parseFrontmatter(text) {
+  const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+  if (!m) return { meta: {}, body: text.trim() };
+  const meta = {};
+  for (const line of m[1].split(/\r?\n/)) {
+    const kv = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
+    if (!kv) continue;
+    meta[kv[1].toLowerCase()] = kv[2].trim().replace(/^["']|["']$/g, "");
+  }
+  return { meta, body: m[2].trim() };
+}
+
+let journalNotes = "";
+if (fs.existsSync(journalsDir)) {
+  const candidates = fs
+    .readdirSync(journalsDir)
+    .filter((f) => f.endsWith(".md"))
+    .sort()
+    .reverse();
+  let matched = null;
+  for (const name of candidates) {
+    const full = path.join(journalsDir, name);
+    let raw = "";
+    try {
+      raw = fs.readFileSync(full, "utf8");
+    } catch {
+      continue;
+    }
+    const parsed = parseFrontmatter(raw);
+    const ms = (parsed.meta.milestone || "").replace(/^v/i, "");
+    const isMilestoneMatch = ms && ms.toLowerCase() === version.toLowerCase();
+    const isNameMatch =
+      name.toLowerCase().includes(dashed) &&
+      (parsed.meta.kind === "milestone" || name.toLowerCase().includes("release-notes"));
+    if (isMilestoneMatch || isNameMatch) {
+      matched = parsed;
+      break;
+    }
+  }
+  if (matched && matched.body) {
+    const title = matched.meta.title || `bot-team v${version} Release Notes`;
+    const body = /^#\s+/.test(matched.body) ? matched.body : `# ${title}\n\n${matched.body}`;
+    journalNotes = `${body.trim()}\n\n---\n\n## Artifacts & Install\n\n${summary}`;
+  }
+}
+
+const finalNotes = journalNotes || summary;
+fs.writeFileSync(process.env.NOTES_PATH, `${finalNotes.trim()}\n`, "utf8");
+NODE
+
 MANIFEST_PATH="$TMP/manifest.json" \
+NOTES_PATH="$NOTES" \
+SLUG="$SLUG" \
 VERSION="$VERSION" \
 BUILT_AT="$BUILT_AT" \
 ARCH="$ARCH" \
@@ -304,14 +389,26 @@ const rows = [
 for (const [name, sha256, size] of rows) {
   if (name) artifacts.push({ name, sha256, size: Number(size) });
 }
+const slug = process.env.SLUG || "AgenticPunk/bot-team-release";
+const tag = `v${process.env.VERSION}`;
+let releaseNotes = null;
+try {
+  const rawNotes = fs.readFileSync(process.env.NOTES_PATH, "utf8").trim();
+  if (rawNotes) releaseNotes = rawNotes.slice(0, 65536);
+} catch {
+  releaseNotes = null;
+}
 const manifest = {
   version: process.env.VERSION,
-  tag: `v${process.env.VERSION}`,
+  tag,
+  repo: slug,
+  releaseUrl: `https://github.com/${slug}/releases/tag/${tag}`,
   builtAt: process.env.BUILT_AT,
   platform: "darwin",
   arch: process.env.ARCH,
   sourceCommit: process.env.SOURCE_COMMIT || null,
   sourceDirty: process.env.SOURCE_DIRTY === "1",
+  ...(releaseNotes ? { releaseNotes } : {}),
   artifacts,
 };
 fs.writeFileSync(
@@ -325,24 +422,6 @@ cp "$TMP/manifest.json" "$DIST/latest.json"
 if [ "$ONLY" = "all" ]; then
   cp "$TMP/manifest.json" "$ROOT/latest.json"
 fi
-
-NOTES="$TMP/RELEASE_NOTES.md"
-{
-  printf 'bot-team v%s\n\n' "$VERSION"
-  printf 'Built for macOS %s.\n\n' "$ARCH"
-  printf 'Artifacts:\n'
-  if [ -n "$CLI_ASSET" ]; then
-    printf -- '- `%s` — standalone CLI bundle\n' "$CLI_ASSET"
-  fi
-  if [ -n "$APP_ASSET" ]; then
-    printf -- '- `%s` — Electron desktop app\n' "$APP_ASSET"
-  fi
-  printf -- '- `SHA256SUMS` — checksums\n\n'
-  printf 'Install:\n\n'
-  printf '```sh\n'
-  printf 'curl -fsSL https://raw.githubusercontent.com/%s/main/install.sh | bash\n' "$SLUG"
-  printf '```\n'
-} > "$NOTES"
 
 printf '\nStaged %s\n' "$DIST"
 printf '  version: %s\n' "$VERSION"
