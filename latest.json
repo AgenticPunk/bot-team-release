@@ -1,24 +1,24 @@
 {
-  "version": "1.6.1",
-  "tag": "v1.6.1",
+  "version": "1.6.2",
+  "tag": "v1.6.2",
   "repo": "AgenticPunk/bot-team-release",
-  "releaseUrl": "https://github.com/AgenticPunk/bot-team-release/releases/tag/v1.6.1",
-  "builtAt": "2026-11-26T19:02:04Z",
+  "releaseUrl": "https://github.com/AgenticPunk/bot-team-release/releases/tag/v1.6.2",
+  "builtAt": "2026-11-26T21:07:01Z",
   "platform": "darwin",
   "arch": "arm64",
-  "sourceCommit": "261e0f145698",
+  "sourceCommit": "230485adf352",
   "sourceDirty": false,
-  "releaseNotes": "bot-team v1.6.1\n\nBuilt for macOS arm64.\n\nArtifacts:\n- `bot-team-cli-1.6.1-darwin-arm64.tar.gz` — standalone CLI bundle\n- `bot-team-app-1.6.1-darwin-arm64.zip` — Electron desktop app\n- `SHA256SUMS` — checksums\n\nInstall:\n\n```sh\ncurl -fsSL https://raw.githubusercontent.com/AgenticPunk/bot-team-release/main/install.sh | bash\n```",
+  "releaseNotes": "bot-team v1.6.2\n\nBuilt for macOS arm64.\n\nArtifacts:\n- `bot-team-cli-1.6.2-darwin-arm64.tar.gz` — standalone CLI bundle\n- `bot-team-app-1.6.2-darwin-arm64.zip` — Electron desktop app\n- `SHA256SUMS` — checksums\n\nInstall:\n\n```sh\ncurl -fsSL https://raw.githubusercontent.com/AgenticPunk/bot-team-release/main/install.sh | bash\n```",
   "artifacts": [
     {
-      "name": "bot-team-cli-1.6.1-darwin-arm64.tar.gz",
-      "sha256": "26d6a0149413d4520567afde489aede3fbbd84ed506a3b057846d5a1d82f580a",
-      "size": 1073561
+      "name": "bot-team-cli-1.6.2-darwin-arm64.tar.gz",
+      "sha256": "bb07e639a06248b96b5bc3fd304011f10d3ece145e80e51977b9e59960b79315",
+      "size": 1099983
     },
     {
-      "name": "bot-team-app-1.6.1-darwin-arm64.zip",
-      "sha256": "b0047c781fa2afe3da072b004b49f0a17c894bed7e89bdf7adfc0312301de880",
-      "size": 102216845
+      "name": "bot-team-app-1.6.2-darwin-arm64.zip",
+      "sha256": "057901c0128c419c04ce3e19905dc2f146662b735630c91e719bc5de6511d344",
+      "size": 102408744
     }
   ]
 }
