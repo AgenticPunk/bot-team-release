@@ -1,0 +1,24 @@
+{
+  "version": "1.6.3",
+  "tag": "v1.6.3",
+  "repo": "AgenticPunk/bot-team-release",
+  "releaseUrl": "https://github.com/AgenticPunk/bot-team-release/releases/tag/v1.6.3",
+  "builtAt": "2026-11-27T10:01:29Z",
+  "platform": "darwin",
+  "arch": "arm64",
+  "sourceCommit": "dae7caeddd62",
+  "sourceDirty": false,
+  "releaseNotes": "bot-team v1.6.3\n\nBuilt for macOS arm64.\n\nArtifacts:\n- `bot-team-cli-1.6.3-darwin-arm64.tar.gz` — standalone CLI bundle\n- `bot-team-app-1.6.3-darwin-arm64.zip` — Electron desktop app\n- `SHA256SUMS` — checksums\n\nInstall:\n\n```sh\ncurl -fsSL https://raw.githubusercontent.com/AgenticPunk/bot-team-release/main/install.sh | bash\n```",
+  "artifacts": [
+    {
+      "name": "bot-team-cli-1.6.3-darwin-arm64.tar.gz",
+      "sha256": "55e98f29a6e0f2bec154e5a0b632a7bc02548c2e9f09e8ddc7faabce47ff78ba",
+      "size": 1122469
+    },
+    {
+      "name": "bot-team-app-1.6.3-darwin-arm64.zip",
+      "sha256": "7366fec7b82c2dcd4327e4ad08ae48fae3e72b82e88d76d329231566dd5906e3",
+      "size": 102474040
+    }
+  ]
+}
